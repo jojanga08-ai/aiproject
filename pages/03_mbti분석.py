@@ -392,6 +392,368 @@ st.info(
     "국가별 조사 표본과 데이터 출처에 따라 실제 인구의 "
     "MBTI 분포와 차이가 있을 수 있습니다."
 )
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+from pathlib import Path
+
+# ==========================================
+# 1. 페이지 설정
+# ==========================================
+st.set_page_config(
+    page_title="세계 MBTI 국가별 순위",
+    page_icon="🌏",
+    layout="wide"
+)
+
+st.title("🌏 세계 MBTI 국가별 순위")
+st.markdown(
+    "MBTI 유형을 선택하면 해당 유형의 비율이 높은 국가부터 순위를 보여줍니다."
+)
+
+# ==========================================
+# 2. CSV 파일 경로
+# ==========================================
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+CSV_FILE = BASE_DIR / "countriesMBTI_16types (1).csv"
+
+
+# ==========================================
+# 3. 데이터 불러오기
+# ==========================================
+@st.cache_data
+def load_data(file_path):
+
+    df = pd.read_csv(file_path)
+
+    df.columns = df.columns.str.strip()
+
+    df["Country"] = df["Country"].astype(str).str.strip()
+
+    mbti_columns = [
+        "ISTJ", "ISFJ", "INFJ", "INTJ",
+        "ISTP", "ISFP", "INFP", "INTP",
+        "ESTP", "ESFP", "ENFP", "ENTP",
+        "ESTJ", "ESFJ", "ENFJ", "ENTJ"
+    ]
+
+    for col in mbti_columns:
+
+        df[col] = pd.to_numeric(
+            df[col],
+            errors="coerce"
+        )
+
+    df[mbti_columns] = df[mbti_columns].fillna(0)
+
+    return df, mbti_columns
+
+
+if not CSV_FILE.exists():
+
+    st.error("CSV 파일을 찾을 수 없습니다.")
+
+    st.code(str(CSV_FILE))
+
+    st.stop()
+
+
+try:
+
+    df, mbti_columns = load_data(str(CSV_FILE))
+
+except Exception as e:
+
+    st.error(f"데이터 오류: {e}")
+
+    st.stop()
+
+
+# ==========================================
+# 4. MBTI 선택
+# ==========================================
+st.subheader("🧠 MBTI 유형 선택")
+
+selected_mbti = st.selectbox(
+    "분석하고 싶은 MBTI를 선택하세요.",
+    mbti_columns,
+    index=mbti_columns.index("INFP")
+)
+
+
+# ==========================================
+# 5. 선택한 MBTI의 국가별 비율
+# ==========================================
+country_data = df[
+    ["Country", selected_mbti]
+].copy()
+
+country_data = country_data.rename(
+    columns={
+        selected_mbti: "비율"
+    }
+)
+
+# 0~1 사이의 값이면 백분율로 변환
+if country_data["비율"].max() <= 1:
+
+    country_data["비율"] = (
+        country_data["비율"] * 100
+    )
+
+
+# ==========================================
+# 6. 높은 순서대로 국가 정렬
+# ==========================================
+country_data = country_data.sort_values(
+    by="비율",
+    ascending=False
+).reset_index(drop=True)
+
+# 순위 추가
+country_data.insert(
+    0,
+    "순위",
+    range(1, len(country_data) + 1)
+)
+
+
+# ==========================================
+# 7. 상단 주요 통계
+# ==========================================
+top_country = country_data.iloc[0]["Country"]
+
+top_value = country_data.iloc[0]["비율"]
+
+second_country = country_data.iloc[1]["Country"]
+
+second_value = country_data.iloc[1]["비율"]
+
+average_value = country_data["비율"].mean()
+
+col1, col2, col3 = st.columns(3)
+
+col1.metric(
+    "🥇 1위 국가",
+    top_country,
+    f"{top_value:.2f}%"
+)
+
+col2.metric(
+    "🥈 2위 국가",
+    second_country,
+    f"{second_value:.2f}%"
+)
+
+col3.metric(
+    "🌍 158개국 평균",
+    f"{average_value:.2f}%"
+)
+
+st.divider()
+
+
+# ==========================================
+# 8. 그라데이션 색상 함수
+# ==========================================
+def hex_to_rgb(hex_color):
+
+    hex_color = hex_color.lstrip("#")
+
+    return tuple(
+        int(hex_color[i:i+2], 16)
+        for i in (0, 2, 4)
+    )
+
+
+def rgb_to_hex(rgb):
+
+    return "#{:02X}{:02X}{:02X}".format(*rgb)
+
+
+def interpolate_color(start, end, amount):
+
+    start_rgb = hex_to_rgb(start)
+
+    end_rgb = hex_to_rgb(end)
+
+    rgb = tuple(
+
+        round(
+            start_rgb[i] +
+            (end_rgb[i] - start_rgb[i]) * amount
+        )
+
+        for i in range(3)
+
+    )
+
+    return rgb_to_hex(rgb)
+
+
+# 1위: 쨍한 연두색
+# 꼴찌: 아주 연한 연두색
+colors = [
+
+    interpolate_color(
+        "#7CFC00",
+        "#EFF9D8",
+        i / max(len(country_data) - 1, 1)
+    )
+
+    for i in range(len(country_data))
+
+]
+
+
+# ==========================================
+# 9. 그래프 데이터
+# ==========================================
+fig = go.Figure()
+
+fig.add_trace(
+
+    go.Bar(
+
+        x=country_data["비율"],
+
+        y=country_data["Country"],
+
+        orientation="h",
+
+        marker=dict(
+
+            color=colors,
+
+            line=dict(
+                color="white",
+                width=0.5
+            )
+
+        ),
+
+        text=[
+            f"{v:.2f}%"
+            for v in country_data["비율"]
+        ],
+
+        textposition="outside",
+
+        cliponaxis=False,
+
+        hovertemplate=
+        "<b>%{y}</b><br>" +
+        "비율: %{x:.2f}%" +
+        "<extra></extra>"
+
+    )
+
+)
+
+
+# ==========================================
+# 10. 그래프 디자인
+# ==========================================
+fig.update_layout(
+
+    title=dict(
+
+        text=f"📊 {selected_mbti} 비율이 높은 국가 순위",
+
+        x=0.02
+
+    ),
+
+    xaxis=dict(
+
+        title="국가별 MBTI 비율 (%)",
+
+        rangemode="tozero",
+
+        showgrid=True,
+
+        gridcolor="rgba(120,120,120,0.15)",
+
+        ticksuffix="%"
+
+    ),
+
+    yaxis=dict(
+
+        title="국가",
+
+        autorange="reversed"
+
+    ),
+
+    height=1000,
+
+    margin=dict(
+
+        l=30,
+
+        r=80,
+
+        t=80,
+
+        b=50
+
+    ),
+
+    plot_bgcolor="rgba(0,0,0,0)",
+
+    paper_bgcolor="rgba(0,0,0,0)",
+
+    font=dict(size=12),
+
+    showlegend=False
+
+)
+
+
+# ==========================================
+# 11. 그래프 출력
+# ==========================================
+st.plotly_chart(
+    fig,
+    use_container_width=True
+)
+
+
+# ==========================================
+# 12. 국가별 순위표
+# ==========================================
+st.subheader(f"🏆 {selected_mbti} 국가별 순위표")
+
+with st.expander("전체 국가 순위표 보기", expanded=True):
+
+    display_data = country_data.copy()
+
+    display_data["비율"] = display_data["비율"].apply(
+        lambda x: f"{x:.2f}%"
+    )
+
+    st.dataframe(
+        display_data,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+# ==========================================
+# 13. 데이터 안내
+# ==========================================
+st.info(
+    "이 순위는 제공된 CSV 데이터에 기록된 국가별 MBTI 비율을 "
+    "기준으로 계산한 결과입니다. 실제 국가 인구 전체의 "
+    "MBTI 분포를 의미하지는 않습니다."
+)
+
+st.caption(
+    "🌱 World MBTI Explorer | Made with Streamlit"
+)
+
 
 st.caption(
     "🌱 World MBTI Explorer | Made with Streamlit"
