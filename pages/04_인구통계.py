@@ -5,73 +5,75 @@ import plotly.graph_objects as go
 from pathlib import Path
 import re
 
-# --------------------------------
-# 1. 페이지 기본 설정
-# --------------------------------
+# =====================================
+# 1. 페이지 설정
+# =====================================
 st.set_page_config(
-    page_title="서울시 인구 분석",
+    page_title="서울시 인구 통계",
     page_icon="📊",
     layout="wide"
 )
 
-st.title("📊 서울시 연령대별 인구 분석")
-st.caption("행정구역과 연도별 인구 현황을 확인해 보세요.")
+st.title("📊 서울시 연령대별 인구 통계")
+st.write("행정구역과 연도를 선택하여 연령대별 인구를 분석해 보세요.")
 
-# --------------------------------
-# 2. CSV 파일 경로 설정
-# py 파일은 pages 폴더 안에 있고
-# CSV는 상위 폴더에 있음
-# --------------------------------
+# =====================================
+# 2. CSV 파일 경로
+# pages 폴더의 상위 폴더에 CSV 존재
+# =====================================
 BASE_DIR = Path(__file__).resolve().parent.parent
 CSV_PATH = BASE_DIR / "populaton.csv"
 
-# --------------------------------
-# 3. CSV 파일 불러오기
-# 한글 인코딩 처리
-# --------------------------------
+# =====================================
+# 3. CSV 데이터 불러오기
+# =====================================
 @st.cache_data
 def load_data():
 
-    try:
-        df = pd.read_csv(
-            CSV_PATH,
-            encoding="cp949",
-            dtype=str
-        )
+    encodings = ["cp949", "euc-kr", "utf-8-sig", "utf-8"]
 
-    except UnicodeDecodeError:
-        df = pd.read_csv(
-            CSV_PATH,
-            encoding="euc-kr",
-            dtype=str
-        )
+    for encoding in encodings:
+        try:
+            data = pd.read_csv(
+                CSV_PATH,
+                encoding=encoding,
+                dtype=str
+            )
+            break
 
-    # 숫자 쉼표 제거
-    for col in df.columns[1:]:
-        df[col] = pd.to_numeric(
-            df[col].astype(str).str.replace(",", "", regex=False),
+        except UnicodeDecodeError:
+            continue
+
+    else:
+        raise ValueError("CSV 한글 인코딩을 확인해 주세요.")
+
+    # 숫자 데이터 쉼표 제거
+    for col in data.columns[1:]:
+        data[col] = pd.to_numeric(
+            data[col]
+            .astype(str)
+            .str.replace(",", "", regex=False),
             errors="coerce"
         )
 
-    return df
+    return data
 
 
 try:
     df = load_data()
 
 except FileNotFoundError:
-    st.error("CSV 파일을 찾을 수 없습니다.")
-    st.info("populaton.csv가 프로젝트 상위 폴더에 있는지 확인하세요.")
+    st.error("populaton.csv 파일을 찾을 수 없습니다.")
     st.stop()
 
 except Exception as e:
-    st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {e}")
+    st.error(f"데이터 읽기 오류: {e}")
     st.stop()
 
 
-# --------------------------------
-# 4. 행정구역 이름 정리
-# --------------------------------
+# =====================================
+# 4. 행정구역 정리
+# =====================================
 df["행정구역명"] = (
     df["행정구역"]
     .astype(str)
@@ -81,129 +83,132 @@ df["행정구역명"] = (
 
 districts = df["행정구역명"].dropna().tolist()
 
-# --------------------------------
-# 5. 연도 목록 추출
-# --------------------------------
-years = sorted(
-    set(
-        re.findall(
-            r"^(\d{4})년_",
-            " ".join(df.columns)
-        )
-    )
-)
-
-# --------------------------------
-# 6. 연령대 컬럼 추출
-# --------------------------------
-age_columns = []
+# =====================================
+# 5. 연도 자동 추출
+# =====================================
+years = set()
 
 for col in df.columns:
-
-    match = re.search(
-        r"_(\d+~\d+세|100세 이상)$",
-        col
-    )
+    match = re.match(r"^(\d{4})년_", str(col))
 
     if match:
-        age_columns.append((col, match.group(1)))
+        years.add(match.group(1))
 
+years = sorted(years)
 
-def age_sort_key(item):
+if not years:
+    st.error("연도 정보를 찾을 수 없습니다.")
+    st.stop()
 
-    age = item[1]
+# =====================================
+# 6. 연령대 추출
+# =====================================
+age_list = [
+    "0~9세",
+    "10~19세",
+    "20~29세",
+    "30~39세",
+    "40~49세",
+    "50~59세",
+    "60~69세",
+    "70~79세",
+    "80~89세",
+    "90~99세",
+    "100세 이상"
+]
 
-    if age == "100세 이상":
-        return 100
-
-    return int(age.split("~")[0])
-
-
-age_columns = sorted(age_columns, key=age_sort_key)
-
-# --------------------------------
-# 7. 사용자 선택 메뉴
-# --------------------------------
-st.subheader("🔎 분석 조건 선택")
+# =====================================
+# 7. 선택 메뉴
+# =====================================
+st.subheader("🔍 분석 조건")
 
 col1, col2, col3 = st.columns(3)
 
 with col1:
     selected_district = st.selectbox(
-        "🏙️ 행정구역 선택",
+        "🏙️ 행정구역",
         districts
     )
 
 with col2:
     selected_gender = st.selectbox(
-        "👤 성별 선택",
+        "👤 성별",
         ["전체 (성별 구분 없음)"]
     )
 
 with col3:
     selected_year = st.selectbox(
-        "📅 연도 선택",
+        "📅 연도",
         years,
         index=len(years) - 1
     )
 
+# ★ 핵심 수정 부분
+# 연도를 반드시 문자열로 변환
+selected_year = str(selected_year)
+
 st.info(
-    "현재 CSV에는 성별 구분이 없으므로 "
-    "전체 인구 데이터만 표시합니다."
+    "현재 데이터 파일에는 성별 구분이 없어 "
+    "전체 인구만 조회할 수 있습니다."
 )
 
-# --------------------------------
-# 8. 선택한 지역 데이터 추출
-# --------------------------------
-selected_data = df[
+# =====================================
+# 8. 선택한 행정구역 찾기
+# =====================================
+selected_row = df[
     df["행정구역명"] == selected_district
 ]
 
-if selected_data.empty:
-    st.error("선택한 행정구역의 데이터가 없습니다.")
+if selected_row.empty:
+    st.error("해당 행정구역의 데이터가 없습니다.")
     st.stop()
 
-selected_data = selected_data.iloc[0]
+selected_row = selected_row.iloc[0]
 
-# --------------------------------
-# 9. 선택한 연도의 연령대별 인구 추출
-# --------------------------------
+# =====================================
+# 9. 연령대별 인구 추출
+# =====================================
 x_values = []
 y_values = []
 
-for col, age in age_columns:
+for age in age_list:
 
-    if col.startswith(selected_year + "년_"):
+    # 연도와 연령대 컬럼 이름 생성
+    column_name = (
+        f"{selected_year}년_거주자_{age}"
+    )
 
-        value = selected_data[col]
+    if column_name in df.columns:
+
+        value = selected_row[column_name]
 
         if pd.notna(value):
             x_values.append(age)
             y_values.append(int(value))
 
-if not x_values:
-    st.warning("선택한 조건에 해당하는 데이터가 없습니다.")
+if len(x_values) == 0:
+    st.warning("선택한 연도의 인구 데이터가 없습니다.")
     st.stop()
 
-# --------------------------------
-# 10. 주요 인구 정보
-# --------------------------------
-total_population_col = (
-    selected_year + "년_거주자_총인구수"
-)
+# =====================================
+# 10. 총인구 표시
+# =====================================
+total_col = f"{selected_year}년_거주자_총인구수"
 
-if total_population_col in df.columns:
-    total_population = selected_data[total_population_col]
+if total_col in df.columns:
 
-    if pd.notna(total_population):
+    total = selected_row[total_col]
+
+    if pd.notna(total):
+
         st.metric(
-            label=f"{selected_district} {selected_year}년 총인구",
-            value=f"{int(total_population):,}명"
+            label=f"{selected_district} 총인구",
+            value=f"{int(total):,}명"
         )
 
-# --------------------------------
+# =====================================
 # 11. 꺾은선 그래프
-# --------------------------------
+# =====================================
 st.subheader(
     f"📈 {selected_district} {selected_year}년 연령대별 인구"
 )
@@ -216,18 +221,21 @@ fig.add_trace(
         y=y_values,
         mode="lines+markers",
         name="인구수",
+
         line=dict(
             color="#39FF14",
             width=4
         ),
+
         marker=dict(
             color="#39FF14",
-            size=10,
+            size=11,
             line=dict(
-                color="#1B5E20",
+                color="#FFFFFF",
                 width=1
             )
         ),
+
         hovertemplate=(
             "연령대: %{x}<br>"
             "인구수: %{y:,}명"
@@ -236,19 +244,19 @@ fig.add_trace(
     )
 )
 
-# --------------------------------
+# =====================================
 # 12. 그래프 디자인
-# --------------------------------
+# =====================================
 fig.update_layout(
 
-    height=550,
+    height=600,
 
     plot_bgcolor="#111111",
     paper_bgcolor="#111111",
 
     font=dict(
         family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
-        color="white",
+        color="#FFFFFF",
         size=13
     ),
 
@@ -256,9 +264,7 @@ fig.update_layout(
         title="연령대",
         type="category",
         showgrid=True,
-        gridcolor="#444444",
-        gridwidth=1,
-        tickangle=0,
+        gridcolor="#555555",
         categoryorder="array",
         categoryarray=x_values
     ),
@@ -267,43 +273,42 @@ fig.update_layout(
         title="인구수 (명)",
         showgrid=True,
         gridcolor="#555555",
-        gridwidth=1,
         tickformat=",",
         dtick=100,
         rangemode="tozero"
     ),
 
-    margin=dict(
-        l=70,
-        r=30,
-        t=40,
-        b=70
-    ),
-
     hovermode="x unified",
 
-    showlegend=False
+    showlegend=False,
+
+    margin=dict(
+        l=80,
+        r=30,
+        t=40,
+        b=80
+    )
 )
 
-# --------------------------------
+# =====================================
 # 13. 그래프 출력
-# --------------------------------
+# =====================================
 st.plotly_chart(
     fig,
     use_container_width=True
 )
 
-# --------------------------------
-# 14. 데이터 표 출력
-# --------------------------------
-st.subheader("📋 연령대별 인구 데이터")
+# =====================================
+# 14. 데이터 표
+# =====================================
+st.subheader("📋 연령대별 인구 상세 데이터")
 
 result_df = pd.DataFrame({
     "연령대": x_values,
     "인구수": y_values
 })
 
-result_df["인구수"] = result_df["인구수"].map(
+result_df["인구수"] = result_df["인구수"].apply(
     lambda x: f"{x:,}명"
 )
 
@@ -313,4 +318,7 @@ st.dataframe(
     hide_index=True
 )
 
-st.success("인구 데이터 분석이 완료되었습니다! 🎉")
+# =====================================
+# 15. 완료 메시지
+# =====================================
+st.success("인구 통계 분석이 완료되었습니다! 🎉")
