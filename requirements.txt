@@ -3,3 +3,5 @@ streamlit>=1.32.0
 folium>=0.15.1
 pandas>=2.0.0
 plotly>=5.20.0
+numpy
+scikit-learn
